@@ -104,7 +104,6 @@ def do_tracwiki(line, next_line):
     line = re.sub(r'^==\s+(.*?)(\s+==)?$', r'## \1', line)
     line = re.sub(r'^=\s+(.*?)(\s+=)?$', r'# \1', line)
 
-
     # text
     line = re.sub(r'\'\'\'(.*?)\'\'\'', r'*\1*', line)
     line = re.sub(r'\'\'(.*?)\'\'', r'_\1_', line)
@@ -112,6 +111,15 @@ def do_tracwiki(line, next_line):
     # code
     line = re.sub(r'{{{#!sh(.*?)}}}', r'`\1`', line)
     line = re.sub(r'{{{(.*?)}}}', r'`\1`', line)
+
+    # images
+    if re.match(r'^\[\[Image\(', line):
+        line = re.sub(r', ?\d\d% ?\) ?\]\]', r')]]', line) # size is not supported
+        line = re.sub(r'\[\[Image\(([^)]+)\)\]\]', r'![\1](/\1)', line)
+        line = re.sub(r'\[\[Image\(', r'[[Image\\', line)
+        line = re.sub(r'!\[(.*?)\]\(([^)]+)\)', lambda match: f'![{match.group(1).replace(":", "/")}]({match.group(2).replace(":", "/")})', line)
+        line = line.replace('(/', "(/" + currentDir + '/')
+        line = line.lower()
 
     # external links
     line = re.sub(r'\[(https?://[^\s\[\]]+)\s([^\[\]]+)\]', r'[\2](\1)', line)
@@ -154,14 +162,6 @@ def do_tracwiki(line, next_line):
     line = re.sub(r'(?i)\[\[BR\]\]', r'<br />', line)
     #  TOC is not supported - use other tools
     line = re.sub(r'\[\[PageOutline.*\]\]', r'', line)
-
-    # images
-    if re.match(r'^\[\[Image\(', line):
-        line = re.sub(r'\[\[Image\(([^)]+)\)\]\]', r'![\1](/\1)', line)
-        line = re.sub(r'\[\[Image\(', r'[[Image\\', line)
-        line = re.sub(r'!\[(.*?)\]\(([^)]+)\)', lambda match: f'![{match.group(1).replace(":", "/")}]({match.group(2).replace(":", "/")})', line)
-        line = line.replace('(/', "(/" + currentDir + '/')
-        line = line.lower()
 
     # translated pages - not supported
     line = re.sub(r'\[\[TranslatedPages\]\]', r'', line)
