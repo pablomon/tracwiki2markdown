@@ -2,22 +2,9 @@
 #
 # Trac Wiki to Markdown converter
 #
-# Copyright(c) 2019 Keisuke MORI (keisuike.mori+ha@gmail.com)
-#
-# This program is free software; you can redistribute it and/or
-# modify it under the terms of the GNU General Public License
-# as published by the Free Software Foundation; either version 2
-# of the License, or (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program; if not, write to the Free Software
-# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
-#
+# This is a revamped version of the original work of Keisuke MORI (keisuike.mori+ha@gmail.com)
+# made by Pablo Monteserín (https://pablomon.github.io/)
+# 
 
 ### for Python 2/3 compatible code in Python 3 style
 #    https://stackoverflow.com/questions/5868506/backwards-compatible-input-calls-in-python
@@ -50,12 +37,9 @@ import argparse
 parser = argparse.ArgumentParser(description='Translator from Trac Wiki to Markdown')
 parser.add_argument('--inputFile', type=str, help='The file to translate')
 parser.add_argument('--currentDir', type=str, default='.', help='Directory of the current page')
-# parser.add_argument('--lang', type=str, default='', help='Language root for wikijs')
 
-# Parsea los argumentos de la línea de comandos
 inputFile = parser.parse_args().inputFile
 currentDir = parser.parse_args().currentDir
-# lang = parser.parse_args().lang
 
 raw = False
 table = False
@@ -66,6 +50,8 @@ list_indent = [-1]
 
 definition_list_item_indent = '&nbsp;&nbsp;&nbsp;'
 is_definition_list_item = False
+
+lines = []
 
 def list_adjust_indent(m):
     global list_level, list_indent
@@ -88,8 +74,12 @@ def do_raw(line):
     line = raw_indent + line
     return line
 
-def do_tracwiki(line, next_line):
+def do_tracwiki(lineIdx, lines):
     global raw, table, is_definition_list_item, definition_list_item_indent
+    line = lines[lineIdx]
+    next_line = lines[lineIdx + 1] if lineIdx + 1 < len(lines) else ''
+
+    line = re.sub(r'\\\\', '', line)
 
     # list
     line = re.sub(r'^(\s*)\* ', list_adjust_indent, line)
@@ -114,21 +104,21 @@ def do_tracwiki(line, next_line):
 
     # images
     if re.match(r'^\[\[Image\(', line):
-        line = re.sub(r', ?\d\d% ?\) ?\]\]', r')]]', line) # size is not supported
+        line = re.sub(r', ?\d\d% ?\) ?\]\]', r')]]', line) # remove size info ( unsupported )
         line = re.sub(r'\[\[Image\(([^)]+)\)\]\]', r'![\1](/\1)', line)
         line = re.sub(r'\[\[Image\(', r'[[Image\\', line)
         line = re.sub(r'!\[(.*?)\]\(([^)]+)\)', lambda match: f'![{match.group(1).replace(":", "/")}]({match.group(2).replace(":", "/")})', line)
         line = line.replace('(/', "(/" + currentDir + '/')
         line = line.lower()
 
-    # external links
-    line = re.sub(r'\[(https?://[^\s\[\]]+)\s([^\[\]]+)\]', r'[\2](\1)', line)
-
     # internal links
     line, count = re.subn(r'\[([^\s\[\]]+)\s([^\[\]]+)\]', r'[\2](\1)', line)
     if count > 0:
         line = line.replace('./', '/' + currentDir + '/')
         line = line.replace('(wiki:', "(/")
+
+    # external links
+    line = re.sub(r'\[(https?://[^\[\s\]]+)\s([^\[\]]+)\]', r'[\2](\1)', line)
 
     # section link
     line = re.sub(r'\[(#[^\s\[\]]+)\s([^\[\]]+)\]', r'[\2](\1)', line)
@@ -142,10 +132,19 @@ def do_tracwiki(line, next_line):
     if not table:
         line, count1 = re.subn(r'\|\|', r'|', line)
         if count1 > 0:
-            temp, count2 = re.subn(r'\|\|', r'|', next_line)
-            line += ' | ' * (count2 - count1)
-            if count2 > 0:
-                header = '|' + '-|' * (count2-1)
+            # find largest number of columns
+            max_columns = count1
+            countingIdx = lineIdx + 1
+            while countingIdx < lineIdx + 50 and countingIdx < len(lines):
+                temp, seps = re.subn(r'\|\|', r'|', lines[countingIdx])
+                if seps == 0:
+                    break
+                max_columns = max(max_columns, seps)
+                countingIdx += 1
+
+            line += ' | ' * (max_columns - count1)
+            if max_columns > 0:
+                header = '|' + '-|' * (max_columns-1)
                 line = line + '\n' + header
                 table = True
     else:
@@ -153,9 +152,9 @@ def do_tracwiki(line, next_line):
         if len(chunks) == 1:
             table = False
         else:
-            line = '|'
-            for chunk in chunks:
-                line += do_tracwiki(chunk, '') + '|'
+            line = '| '
+            for i in range(1,len(chunks)-1):
+                line += do_tracwiki(i, chunks) + '|'
             table = True
 
     # macro
@@ -176,8 +175,7 @@ def do_tracwiki(line, next_line):
     # definition list
     if line == '':
         is_definition_list_item = False
-    if is_definition_list_item:
-        # si empieza por *,- o + 
+    if is_definition_list_item:        
         if re.match(r'^\s*[\*\-\+]', line):
             line = re.sub(r'^\s*[\*\-\+]', r'', line)
             line = "- " + definition_list_item_indent + line
@@ -193,12 +191,21 @@ def do_tracwiki(line, next_line):
     # source code
     line = re.sub(r'\[source:(.*?)\]', r'\1', line)
 
+    ## Downloads
+    #line = re.sub(r'\[download:([^\s|\]]+)\s+([^\]]*)\]',r'[\2](\\Downloads\\\1)', line) # with description
+    # line = re.sub(r'\[download:([^\]]*)\]',r'[\1](\\Downloads\\\1)', line) # without description
+
     # italic
-    # line = re.sub(r'_(\w+)_', r'*\1*' , line)
+    # line = re.sub(r'(?<!_)(\w+)(?!_)', r'*\1*' , line)
     # bold line
     line = re.sub(r'^\*\*(.*?)', r'- \1' , line)
     # underline
     line = re.sub(r'__(.*?)__', r'<u>\1</u>' , line)
+    line = re.sub(r'\/\/([A-zÀ-ú]+)\/\/', r'<u>\1</u>', line)
+
+    # clean up
+    line = re.sub(r'\\\\\s+\\\\', r'', line)
+    line = re.sub(r'#!div style=".*"\s?>?', r'', line)
 
     return line
 
@@ -236,16 +243,12 @@ else:
 
 lines = []
 for line in trac_input:
-    lines.append(line)
+    lines.append(line.rstrip())
 
 for i in range(len(lines) - 1):
     line = lines[i].rstrip()
-    next_line = ''
-    if (i + 1) < len(lines):
-        next_line = lines[i + 1].rstrip()
     if raw:
         line = do_raw(line)
     else:
-        line = do_tracwiki(line, next_line)
-
+        line = do_tracwiki(i, lines)
     print(line)
